@@ -1,0 +1,43 @@
+# --- Secrets: never commit these ---------------------------------------------
+# Google OAuth client, as downloaded from the Cloud console
+# (client_secret_<id>.apps.googleusercontent.com.json) or renamed
+client_secret*.json
+*.apps.googleusercontent.com.json
+credentials*.json
+# OAuth tokens
+token*.json
+# Taskling's per-user files: they live in ~/.config/taskling and ~/.cache/taskling,
+# these patterns catch copies that end up in the repository by mistake
+.config/
+.cache/
+settings.json
+reminders.json
+*.log
+# Generic secrets
+.env
+.env.*
+*.pem
+*.key
+*.p12
+
+# --- Python ------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# --- Editors and OS ----------------------------------------------------------
+.idea/
+.vscode/
+*.swp
+*~
+.DS_Store

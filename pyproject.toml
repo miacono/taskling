@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "taskling"
+version = "0.1.0"
+description = "An open source Google Tasks client for the Linux system tray and terminal"
+readme = "README.md"
+license = { text = "AGPL-3.0-or-later" }
+authors = [{ name = "Matteo Iacono", email = "matteo@iacono.io" }]
+requires-python = ">=3.10"
+dependencies = ["PyQt6>=6.4"]
+
+[project.scripts]
+taskling = "taskling.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

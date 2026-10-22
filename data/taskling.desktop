@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Taskling
+Comment=Google Tasks in the system tray
+Exec=taskling tray
+Icon=taskling
+Terminal=false
+Categories=Office;Utility;
+StartupNotify=false
