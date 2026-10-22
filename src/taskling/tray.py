@@ -13,8 +13,8 @@ from PyQt6.QtCore import QDate, QLocale, QObject, QPoint, QRect, QSize, Qt, QTim
 from PyQt6.QtGui import (QColor, QCursor, QGuiApplication, QIcon, QKeySequence, QPainter, QPalette, QPen,
                          QPixmap, QPolygon, QShortcut)
 from PyQt6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QComboBox, QDateEdit, QHBoxLayout,
-                             QHeaderView, QLabel, QLineEdit, QMenu, QPlainTextEdit, QStyledItemDelegate,
-                             QSystemTrayIcon, QTimeEdit, QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout,
+                             QHeaderView, QLabel, QLineEdit, QMenu, QPlainTextEdit, QStyle, QStyledItemDelegate,
+                             QStyleOptionViewItem, QSystemTrayIcon, QTimeEdit, QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout,
                              QWidget)
 
 from . import api, auth, config, reminders
@@ -24,6 +24,7 @@ REMINDER_CHECK_MS = 30 * 1000
 SCHEDULE_SAVE_DELAY_MS = 800  # lets the user finish typing a date or time before saving it
 ID_ROLE = Qt.ItemDataRole.UserRole
 TITLE, DUE = 0, 1  # tree columns
+ROW_PADDING = 4  # pixels above and below each task, to space them out
 LATE_COLOR = QColor("#d93025")
 TODAY_COLOR = QColor("#1a73e8")
 LOG_FILE = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "taskling" / "taskling.log"
@@ -72,11 +73,210 @@ class DetailsEdit(QPlainTextEdit):
         self.focus_lost.emit()
 
 
+class WrappingDelegate(QStyledItemDelegate):
+    """Lets titles wrap onto more lines, with the check box and icon beside the first line.
+
+    QTreeView sizes rows for a single line of text, and Qt centres the check box vertically,
+    so this delegate computes the wrapped height and draws the check box at the top itself.
+    """
+
+    def __init__(self, tree: QTreeWidget):
+        super().__init__(tree)
+        self.tree = tree
+
+    def initStyleOption(self, option, index) -> None:
+        super().initStyleOption(option, index)
+        option.displayAlignment = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop
+        option.decorationAlignment = Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop
+
+    def _line_height(self, opt: QStyleOptionViewItem) -> int:
+        """Height of the item as a single, unwrapped line."""
+        line = QStyleOptionViewItem(opt)
+        line.features &= ~QStyleOptionViewItem.ViewItemFeature.WrapText
+        line.text = "X"
+        return self.tree.style().sizeFromContents(
+            QStyle.ContentsType.CT_ItemViewItem, line, QSize(), self.tree).height()
+
+    def _first_line(self, option, index) -> QStyleOptionViewItem:
+        """The item laid out as a single line at the top of its row, below the padding."""
+        opt = QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+        height = min(self._line_height(opt), opt.rect.height() - 2 * ROW_PADDING)
+        opt.rect = QRect(opt.rect.left(), opt.rect.top() + ROW_PADDING, opt.rect.width(), height)
+        return opt
+
+    def paint(self, painter, option, index) -> None:
+        opt = QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+        style = self.tree.style()
+        style.drawPrimitive(QStyle.PrimitiveElement.PE_PanelItemViewItem, opt, painter, self.tree)
+        content = QStyleOptionViewItem(opt)
+        content.rect = opt.rect.adjusted(0, ROW_PADDING, 0, -ROW_PADDING)
+        has_check = QStyleOptionViewItem.ViewItemFeature.HasCheckIndicator
+        if not opt.features & has_check:
+            style.drawControl(QStyle.ControlElement.CE_ItemViewItem, content, painter, self.tree)
+            return
+
+        first = self._first_line(option, index)
+        check = QStyleOptionViewItem(first)
+        check.rect = style.subElementRect(QStyle.SubElement.SE_ItemViewItemCheckIndicator, first, self.tree)
+        check.state &= ~QStyle.StateFlag.State_HasFocus
+        check.state |= (QStyle.StateFlag.State_On if opt.checkState == Qt.CheckState.Checked
+                        else QStyle.StateFlag.State_Off)
+
+        # The rest of the item is laid out without the check box, in the space after it.
+        rest = QStyleOptionViewItem(content)
+        rest.features &= ~has_check
+        unchecked_first = QStyleOptionViewItem(first)
+        unchecked_first.features &= ~has_check
+        text = QStyle.SubElement.SE_ItemViewItemText
+        shift = (style.subElementRect(text, first, self.tree).left()
+                 - style.subElementRect(text, unchecked_first, self.tree).left())
+        rest.rect.setLeft(rest.rect.left() + shift)
+
+        style.drawControl(QStyle.ControlElement.CE_ItemViewItem, rest, painter, self.tree)
+        style.drawPrimitive(QStyle.PrimitiveElement.PE_IndicatorItemViewItemCheck, check, painter, self.tree)
+
+    def editorEvent(self, event, model, option, index) -> bool:
+        # Hit-test clicks on the check box where paint() draws it.
+        return super().editorEvent(event, model, self._first_line(option, index), index)
+
+    def sizeHint(self, option, index) -> QSize:
+        width = super().sizeHint(option, index).width()
+        opt = QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+        depth, parent = 0, index.parent()
+        while parent.isValid():
+            depth, parent = depth + 1, parent.parent()
+        opt.rect = QRect(0, 0, self.tree.columnWidth(index.column()) - depth * self.tree.indentation(), 10_000)
+        style = self.tree.style()
+        text_rect = style.subElementRect(QStyle.SubElement.SE_ItemViewItemText, opt, self.tree)
+        margin = style.pixelMetric(QStyle.PixelMetric.PM_FocusFrameHMargin, opt, self.tree) + 1
+        bounds = QRect(0, 0, max(text_rect.width() - 2 * margin, 1), 10_000)
+        text_height = opt.fontMetrics.boundingRect(bounds, Qt.TextFlag.TextWordWrap, opt.text).height()
+        extra_lines = text_height - opt.fontMetrics.height()
+        return QSize(width, self._line_height(opt) + max(extra_lines, 0) + 2 * ROW_PADDING)
+
+
+class TaskTree(QTreeWidget):
+    """Task tree whose open tasks can be reordered by dragging them with the mouse.
+
+    The drag is made of plain mouse events: a QDrag runs an event loop of its own, which could
+    close the popup window the tree lives in.
+    """
+
+    # task id, new parent id (None: top level), previous sibling id (None: first)
+    moved = pyqtSignal(str, object, object)
+
+    def __init__(self):
+        super().__init__()
+        self.press_pos: QPoint | None = None
+        self.dragged: QTreeWidgetItem | None = None
+        self.dragging = False
+        self.drop: tuple[int, QTreeWidgetItem | None, QTreeWidgetItem | None] | None = None  # line y, parent, previous
+
+    @staticmethod
+    def _done(item: QTreeWidgetItem) -> bool:
+        return item.checkState(TITLE) == Qt.CheckState.Checked
+
+    def _previous_sibling(self, item: QTreeWidgetItem) -> QTreeWidgetItem | None:
+        """The open sibling above an item, ignoring the dragged one."""
+        parent = item.parent() or self.invisibleRootItem()
+        for i in range(parent.indexOfChild(item) - 1, -1, -1):
+            sibling = parent.child(i)
+            if sibling is not self.dragged and not self._done(sibling):
+                return sibling
+        return None
+
+    def _drop_at(self, pos: QPoint):
+        """Where the dragged task would land, or None when it cannot be dropped there."""
+        target = self.itemAt(pos)
+        if target is None:  # below the last task: after the last open top-level task
+            root = self.invisibleRootItem()
+            candidates = [root.child(i) for i in range(root.childCount())]
+            target = next((item for item in reversed(candidates) if not self._done(item)), None)
+            if target is None:
+                return None
+            pos = self.visualItemRect(target).bottomLeft()
+        if self._done(target):
+            return None
+        ancestor = target
+        while ancestor is not None:  # never relative to itself or its own subtasks
+            if ancestor is self.dragged:
+                return None
+            ancestor = ancestor.parent()
+        rect = self.visualItemRect(target)
+        if pos.y() < rect.center().y():
+            line, parent, previous = rect.top(), target.parent(), self._previous_sibling(target)
+        elif target.childCount() and target.isExpanded():  # right below a parent: its first subtask
+            line, parent, previous = rect.bottom(), target, None
+        else:
+            line, parent, previous = rect.bottom(), target.parent(), target
+        if parent is not None and self.dragged.childCount():
+            return None  # Google Tasks has a single level of subtasks
+        if parent is self.dragged.parent() and previous is self._previous_sibling(self.dragged):
+            return None  # it would stay where it is
+        return line, parent, previous
+
+    def mousePressEvent(self, event) -> None:
+        super().mousePressEvent(event)
+        item = self.itemAt(event.position().toPoint())
+        if event.button() == Qt.MouseButton.LeftButton and item is not None and not self._done(item):
+            self.press_pos, self.dragged = event.position().toPoint(), item
+
+    def mouseMoveEvent(self, event) -> None:
+        if self.dragged is None or not event.buttons() & Qt.MouseButton.LeftButton:
+            super().mouseMoveEvent(event)
+            return
+        pos = event.position().toPoint()
+        if not self.dragging:
+            if (pos - self.press_pos).manhattanLength() < QApplication.startDragDistance():
+                return
+            self.dragging = True
+            self.viewport().setCursor(Qt.CursorShape.ClosedHandCursor)
+        self.drop = self._drop_at(pos)
+        self.viewport().update()
+
+    def mouseReleaseEvent(self, event) -> None:
+        if not self.dragging:
+            self.dragged = None
+            super().mouseReleaseEvent(event)
+            return
+        drop, dragged = self.drop, self.dragged
+        self.dragging, self.dragged, self.drop = False, None, None
+        self.viewport().unsetCursor()
+        self.viewport().update()
+        if drop:
+            _, parent, previous = drop
+            self.moved.emit(dragged.data(TITLE, ID_ROLE),
+                            parent.data(TITLE, ID_ROLE) if parent else None,
+                            previous.data(TITLE, ID_ROLE) if previous else None)
+
+    def paintEvent(self, event) -> None:
+        super().paintEvent(event)
+        if self.dragging and self.drop:
+            line, parent, _ = self.drop
+            painter = QPainter(self.viewport())
+            painter.setPen(QPen(self.palette().color(QPalette.ColorRole.Highlight), 2))
+            left = self.indentation() if parent is not None else 0
+            painter.drawLine(left, line, self.viewport().width(), line)
+            painter.end()
+
+
 class ReadOnlyDelegate(QStyledItemDelegate):
-    """Keeps a column out of in-place editing."""
+    """Keeps a column out of in-place editing; its text gets the same padding as the titles."""
 
     def createEditor(self, parent, option, index):
         return None
+
+    def paint(self, painter, option, index) -> None:
+        opt = QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+        style = option.widget.style()
+        style.drawPrimitive(QStyle.PrimitiveElement.PE_PanelItemViewItem, opt, painter, option.widget)
+        content = QStyleOptionViewItem(option)
+        content.rect = option.rect.adjusted(0, ROW_PADDING, 0, -ROW_PADDING)
+        super().paint(painter, content, index)
 
 
 class Worker(QObject):
@@ -135,7 +335,8 @@ class TaskWindow(QWidget):
         header.addWidget(self.show_done)
         header.addWidget(refresh)
 
-        self.tree = QTreeWidget()
+        self.tree = TaskTree()
+        self.tree.moved.connect(self._on_moved)
         self.tree.setColumnCount(2)
         self.tree.setHeaderHidden(True)
         self.tree.header().setStretchLastSection(False)
@@ -143,6 +344,10 @@ class TaskWindow(QWidget):
         self.tree.header().setSectionResizeMode(DUE, QHeaderView.ResizeMode.ResizeToContents)
         self.tree.setItemDelegateForColumn(DUE, ReadOnlyDelegate(self.tree))
         self.tree.setRootIsDecorated(False)
+        # Long titles wrap onto more lines instead of being cut.
+        self.tree.setWordWrap(True)
+        self.tree.setItemDelegateForColumn(TITLE, WrappingDelegate(self.tree))
+        self.tree.header().sectionResized.connect(self.tree.doItemsLayout)  # recompute the row heights
         self.tree.setEditTriggers(QAbstractItemView.EditTrigger.DoubleClicked
                                   | QAbstractItemView.EditTrigger.EditKeyPressed)
         self.tree.itemChanged.connect(self._on_item_changed)
@@ -284,12 +489,13 @@ class TaskWindow(QWidget):
             item.setData(TITLE, ID_ROLE, task.id)
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEditable)
             item.setCheckState(TITLE, Qt.CheckState.Checked if task.done else Qt.CheckState.Unchecked)
+            item.setToolTip(TITLE, f"{task.title}\n\n{task.notes}" if task.notes else task.title)
             if task.notes:
-                item.setToolTip(TITLE, task.notes)
                 item.setIcon(TITLE, self.details_icon)
             if due := task.due_date:
                 at = saved.get(task.id, {}).get("time")
                 item.setText(DUE, QLocale().toString(to_qdate(due), "d MMM") + (f" {at}" if at else ""))
+                item.setTextAlignment(DUE, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
                 late = reminders.moment(due, at) <= now if at else due < now.date()
                 if task.done:
                     item.setForeground(DUE, muted)
@@ -433,6 +639,25 @@ class TaskWindow(QWidget):
             task.due = api.due_value(due) if due else ""
             self._mutate(api.update, self.current.id, task.id, None, None, due or "")
         QTimer.singleShot(0, self._populate)  # show the new date and time in the list
+
+    def _on_moved(self, task_id: str, parent_id: str | None, previous_id: str | None) -> None:
+        if self.current is None:
+            return
+        # Show the new order right away; the refresh after the move brings Google's.
+        moved = self._find(task_id)
+        block_ids = {task_id} | {task.id for task in self.tasks if task.parent == task_id and not task.done}
+        block = [task for task in self.tasks if task.id in block_ids]
+        rest = [task for task in self.tasks if task.id not in block_ids]
+        moved.parent = parent_id
+        anchor_id = previous_id or parent_id
+        index = 0
+        if anchor_id:
+            index = next(i for i, task in enumerate(rest) if task.id == anchor_id) + 1
+            while previous_id and index < len(rest) and rest[index].parent == previous_id:
+                index += 1  # after the subtasks of the previous task too
+        self.tasks = rest[:index] + block + rest[index:]
+        self._mutate(api.move, self.current.id, task_id, parent_id, previous_id)
+        QTimer.singleShot(0, self._populate)
 
     def _on_list_changed(self, index: int) -> None:
         if not 0 <= index < len(self.tasklists):

@@ -133,6 +133,24 @@ def _change(args, action: str) -> None:
             print(f"{'Done' if action == 'done' else 'Reopened'}: {task.title}")
 
 
+def cmd_mv(args) -> None:
+    tasklist = _tasklist(args)
+    tasks = api.tasks(tasklist.id)
+    [task] = _pick(tasks, [args.task])
+    if args.after:
+        [anchor] = _pick(tasks, [args.after])
+        parent, previous = anchor.parent, anchor.id
+    elif args.under:
+        [anchor] = _pick(tasks, [args.under])
+        parent, previous = anchor.id, None
+    else:
+        parent, previous = None, None
+    if task.id in (previous, parent):
+        sys.exit("taskling: a task cannot be moved relative to itself")
+    api.move(tasklist.id, task.id, parent, previous)
+    print(f"Moved: {task.title}")
+
+
 def cmd_edit(args) -> None:
     if all(value is None for value in (args.title, args.notes, args.due, args.at)):
         sys.exit("taskling: nothing to change, give a new title, -n DETAILS, --due DATE and/or --at TIME")
@@ -180,6 +198,12 @@ def main(argv: list[str] | None = None) -> int | None:
     for name, help_text in (("done", "mark tasks as done"), ("undo", "reopen completed tasks"), ("rm", "delete tasks")):
         sub = commands.add_parser(name, parents=[list_option], help=help_text)
         sub.add_argument("tasks", nargs="+", help="task numbers from 'ls' (or ids)")
+    mv = commands.add_parser("mv", parents=[list_option], help="move a task in the list")
+    mv.add_argument("task", help="task number from 'ls' (or id)")
+    where = mv.add_mutually_exclusive_group(required=True)
+    where.add_argument("--top", action="store_true", help="move it to the top of the list")
+    where.add_argument("--after", metavar="TASK", help="move it right after this task, at the same level")
+    where.add_argument("--under", metavar="TASK", help="make it the first subtask of this task")
     edit = commands.add_parser("edit", parents=[list_option],
                                help="change the title, details, due date or reminder of a task")
     edit.add_argument("task", help="task number from 'ls' (or id)")
@@ -196,6 +220,7 @@ def main(argv: list[str] | None = None) -> int | None:
 
     handlers = {
         "auth": cmd_auth, "lists": cmd_lists, "use": cmd_use, "ls": cmd_ls, "add": cmd_add, "edit": cmd_edit,
+        "mv": cmd_mv,
         "done": lambda args: _change(args, "done"),
         "undo": lambda args: _change(args, "undo"),
         "rm": lambda args: _change(args, "rm"),

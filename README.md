@@ -28,6 +28,7 @@ your other applets, opens instantly and stays out of the way.
 - **Details**: read and edit the notes of a task; tasks with details are marked with ≡
 - **Due dates**, synced with Google Tasks, shown in red when overdue and in blue when due today
 - **Reminders**: a desktop notification on the due date at the time you choose
+- **Drag and drop** to reorder tasks, synced with Google Tasks
 - **Subtasks** shown under their parent, **multiple lists**, optional view of **completed tasks**
 - **Command line** for every operation, with `--json` output for scripts
 - **Private by design**: it talks directly to Google with your own OAuth client, no servers in between
@@ -113,6 +114,8 @@ Start Taskling from the applications menu, or run `taskling`. Then click the tra
 | add a task | type in *Add a task…* and press Enter |
 | rename a task | double-click it, or select it and press F2 |
 | delete a task | select it and press Delete, or right-click it |
+| reorder tasks | drag a task up or down; a line shows where it will land |
+| make a task a subtask | drag it right below a task that already has subtasks |
 | edit the details | select the task and write in the box below the list |
 | set a due date | tick **Due** and pick the date |
 | set a reminder | tick **at** and set the time |
@@ -135,6 +138,9 @@ taskling add TITLE [-n DETAILS] [--due DATE] [--at HH:MM]
 taskling done 1 3               complete tasks, by the numbers shown by 'ls'
 taskling undo 5                 reopen a completed task (numbers from 'ls -a')
 taskling edit 2 [TITLE] [-n DETAILS] [--due DATE] [--at HH:MM]
+taskling mv 3 --top             move a task to the top of the list
+taskling mv 3 --after 5         move a task right after another one, at the same level
+taskling mv 3 --under 1         make a task the first subtask of another one
 taskling rm 4                   delete a task
 ```
 

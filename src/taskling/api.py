@@ -170,5 +170,12 @@ def update(tasklist_id: str, task_id: str, title: str | None = None, notes: str 
     return Task.from_json(_request("PATCH", _task_path(tasklist_id, task_id), body=body))
 
 
+def move(tasklist_id: str, task_id: str, parent: str | None = None, previous: str | None = None) -> Task:
+    """Move a task after `previous` among the children of `parent`; None puts it first, or at the top level."""
+    params = {key: value for key, value in (("parent", parent), ("previous", previous)) if value}
+    # An empty JSON body, because Google rejects a POST without a Content-Length.
+    return Task.from_json(_request("POST", _task_path(tasklist_id, task_id) + "/move", params, body={}))
+
+
 def delete(tasklist_id: str, task_id: str) -> None:
     _request("DELETE", _task_path(tasklist_id, task_id))
