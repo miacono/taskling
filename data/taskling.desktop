@@ -7,3 +7,4 @@ Icon=taskling
 Terminal=false
 Categories=Office;Utility;
 StartupNotify=false
+X-LXQt-Need-Tray=true

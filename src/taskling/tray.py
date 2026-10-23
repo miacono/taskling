@@ -21,6 +21,7 @@ from . import api, auth, config, reminders
 
 REFRESH_INTERVAL_MS = 5 * 60 * 1000
 REMINDER_CHECK_MS = 30 * 1000
+TRAY_WAIT_SECONDS = 60  # how long to wait at login for the panel to provide a system tray
 SCHEDULE_SAVE_DELAY_MS = 800  # lets the user finish typing a date or time before saving it
 ID_ROLE = Qt.ItemDataRole.UserRole
 TITLE, DUE = 0, 1  # tree columns
@@ -768,9 +769,14 @@ def run() -> int:
     app = QApplication(sys.argv)
     app.setApplicationName("Taskling")
     app.setQuitOnLastWindowClosed(False)
-    if not QSystemTrayIcon.isSystemTrayAvailable():
-        print("taskling: no system tray available", file=sys.stderr)
-        return 1
+    # At login the session autostarts us before the panel has created its tray: wait for it.
+    deadline = time.monotonic() + TRAY_WAIT_SECONDS
+    while not QSystemTrayIcon.isSystemTrayAvailable():
+        if time.monotonic() > deadline:
+            log.error("no system tray available after %ds", TRAY_WAIT_SECONDS)
+            print("taskling: no system tray available", file=sys.stderr)
+            return 1
+        time.sleep(1)
 
     worker = Worker()
     window = TaskWindow(worker)
