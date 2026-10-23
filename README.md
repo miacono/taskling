@@ -26,7 +26,8 @@ your other applets, opens instantly and stays out of the way.
 - **Checklist in the tray**: tick a task to complete it, untick it to reopen it
 - **Quick capture**: type a task and press Enter
 - **Details**: read and edit the notes of a task; tasks with details are marked with ≡
-- **Due dates**, synced with Google Tasks, shown in red when overdue and in blue when due today
+- **Due dates**, synced with Google Tasks; the row is tinted red when overdue, orange when due today or
+  tomorrow and yellow when due within 3 days
 - **Reminders**: a desktop notification on the due date at the time you choose
 - **Drag and drop** to reorder tasks, synced with Google Tasks
 - **Subtasks** shown under their parent, **multiple lists**, optional view of **completed tasks**
