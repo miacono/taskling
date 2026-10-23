@@ -490,7 +490,6 @@ class TaskWindow(QWidget):
             item.setData(TITLE, ID_ROLE, task.id)
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEditable)
             item.setCheckState(TITLE, Qt.CheckState.Checked if task.done else Qt.CheckState.Unchecked)
-            item.setToolTip(TITLE, f"{task.title}\n\n{task.notes}" if task.notes else task.title)
             if task.notes:
                 item.setIcon(TITLE, self.details_icon)
             if due := task.due_date:
