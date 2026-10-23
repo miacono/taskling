@@ -24,10 +24,13 @@ REMINDER_CHECK_MS = 30 * 1000
 TRAY_WAIT_SECONDS = 60  # how long to wait at login for the panel to provide a system tray
 SCHEDULE_SAVE_DELAY_MS = 800  # lets the user finish typing a date or time before saving it
 ID_ROLE = Qt.ItemDataRole.UserRole
+TINT_ROLE = Qt.ItemDataRole.UserRole + 1  # background of the whole row, see TaskTree.drawRow()
 TITLE, DUE = 0, 1  # tree columns
 ROW_PADDING = 4  # pixels above and below each task, to space them out
-LATE_COLOR = QColor("#d93025")
-TODAY_COLOR = QColor("#1a73e8")
+# Row tints, translucent so that they stay light on both light and dark themes.
+LATE_COLOR = QColor(217, 48, 37, 45)  # overdue
+SOON_COLOR = QColor(232, 113, 10, 45)  # due today or tomorrow
+NEAR_COLOR = QColor(249, 171, 0, 45)  # due within 3 days
 LOG_FILE = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "taskling" / "taskling.log"
 
 log = logging.getLogger("taskling")
@@ -252,6 +255,13 @@ class TaskTree(QTreeWidget):
             self.moved.emit(dragged.data(TITLE, ID_ROLE),
                             parent.data(TITLE, ID_ROLE) if parent else None,
                             previous.data(TITLE, ID_ROLE) if previous else None)
+
+    def drawRow(self, painter, option, index) -> None:
+        # Painted once across the whole row, indentation included: item backgrounds would be
+        # painted per column, and twice over the title by WrappingDelegate.
+        if tint := index.siblingAtColumn(TITLE).data(TINT_ROLE):
+            painter.fillRect(option.rect, tint)
+        super().drawRow(painter, option, index)
 
     def paintEvent(self, event) -> None:
         super().paintEvent(event)
@@ -497,12 +507,12 @@ class TaskWindow(QWidget):
                 item.setText(DUE, QLocale().toString(to_qdate(due), "d MMM") + (f" {at}" if at else ""))
                 item.setTextAlignment(DUE, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
                 late = reminders.moment(due, at) <= now if at else due < now.date()
+                days = (due - now.date()).days
+                tint = LATE_COLOR if late else SOON_COLOR if days <= 1 else NEAR_COLOR if days <= 3 else None
                 if task.done:
                     item.setForeground(DUE, muted)
-                elif late:
-                    item.setForeground(DUE, LATE_COLOR)
-                elif due == now.date():
-                    item.setForeground(DUE, TODAY_COLOR)
+                elif tint:
+                    item.setData(TITLE, TINT_ROLE, tint)
             if task.done:
                 font = item.font(TITLE)
                 font.setStrikeOut(True)
