@@ -12,7 +12,7 @@ syncs with the official Google Tasks app on your phone. A command line interface
 terminal, and its JSON output makes your to-do list easy to manage from scripts and AI assistants.
 
 <p align="center">
-  <img src="docs/screenshot.png" alt="The Taskling popup: a checklist of tasks with due dates, details and a reminder" width="380">
+  <img src="docs/screenshot.png" alt="The Taskling popup: a checklist of tasks tinted by how close their due date is, with details and a reminder" width="380">
 </p>
 
 ## Why
